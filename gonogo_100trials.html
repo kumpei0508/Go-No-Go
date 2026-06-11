@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Go/No-Go課題</title>
+
+<script src="https://unpkg.com/jspsych@7.3.4"></script>
+<link href="https://unpkg.com/jspsych@7.3.4/css/jspsych.css" rel="stylesheet">
+
+<script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response@1.1.3"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+
+<body></body>
+
+<script>
+
+const jsPsych = initJsPsych({
+  on_finish: function() {
+    jsPsych.data.displayData();
+  }
+});
+
+let timeline = [];
+
+// -----------------------------
+// d-prime用：標準正規分布の逆関数
+// Peter J. Acklam's approximation
+// -----------------------------
+function normInv(p) {
+  if (p <= 0 || p >= 1) {
+    throw new Error("p must be between 0 and 1");
+  }
+
+  const a1 = -39.6968302866538, a2 = 220.946098424521, a3 = -275.928510446969;
+  const a4 = 138.357751867269, a5 = -30.6647980661472, a6 = 2.50662827745924;
+
+  const b1 = -54.4760987982241, b2 = 161.585836858041, b3 = -155.698979859887;
+  const b4 = 66.8013118877197, b5 = -13.2806815528857;
+
+  const c1 = -0.00778489400243029, c2 = -0.322396458041136, c3 = -2.40075827716184;
+  const c4 = -2.54973253934373, c5 = 4.37466414146497, c6 = 2.93816398269878;
+
+  const d1 = 0.00778469570904146, d2 = 0.32246712907004, d3 = 2.445134137143;
+  const d4 = 3.75440866190742;
+
+  const p_low = 0.02425;
+  const p_high = 1 - p_low;
+
+  let q, r;
+
+  if (p < p_low) {
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
+           ((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
+  }
+
+  if (p <= p_high) {
+    q = p - 0.5;
+    r = q * q;
+    return (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q /
+           (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1);
+  }
+
+  q = Math.sqrt(-2 * Math.log(1 - p));
+  return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
+          ((((d1 * q + d2) * q + d3) * q + d4) * q + 1);
+}
+
+// -----------------------------
+// 説明画面
+// -----------------------------
+timeline.push({
+  type: jsPsychHtmlKeyboardResponse,
+  stimulus: `
+    <h2>Go/No-Go課題</h2>
+    <p>○が出たらスペースキーを押してください。</p>
+    <p>×が出たら押さないでください。</p>
+    <p>まず練習を行います。</p>
+    <p>何かキーを押して開始します。</p>
+  `
+});
+
+// -----------------------------
+// 試行作成関数
+// -----------------------------
+function makeTrials(nGo, nNoGo, blockName) {
+  let trials = [];
+
+  for (let i = 0; i < nGo; i++) {
+    trials.push({
+      stimulus: "<div style='font-size:100px;'>○</div>",
+      correct_response: " ",
+      stimulus_type: "go",
+      block: blockName
+    });
+  }
+
+  for (let i = 0; i < nNoGo; i++) {
+    trials.push({
+      stimulus: "<div style='font-size:100px;'>×</div>",
+      correct_response: null,
+      stimulus_type: "nogo",
+      block: blockName
+    });
+  }
+
+  return jsPsych.randomization.shuffle(trials);
+}
+
+// -----------------------------
+// 試行追加関数
+// -----------------------------
+function addTrialsToTimeline(trials) {
+  trials.forEach(t => {
+
+    // 注視点：500 ms
+    timeline.push({
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: "<div style='font-size:60px;'>+</div>",
+      choices: "NO_KEYS",
+      trial_duration: 500
+    });
+
+    // 刺激提示：最大1000 ms
+    timeline.push({
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: t.stimulus,
+      choices: [" "],
+      trial_duration: 1000,
+      response_ends_trial: true,
+
+      data: {
+        block: t.block,
+        stimulus_type: t.stimulus_type,
+        correct_response: t.correct_response
+      },
+
+      on_finish: function(data) {
+        data.correct =
+          (data.correct_response === null && data.response === null) ||
+          (data.correct_response === " " && data.response !== null);
+
+        data.hit = (data.stimulus_type === "go" && data.response !== null);
+        data.miss = (data.stimulus_type === "go" && data.response === null);
+        data.false_alarm = (data.stimulus_type === "nogo" && data.response !== null);
+        data.correct_rejection = (data.stimulus_type === "nogo" && data.response === null);
+      }
+    });
+
+  });
+}
+
+// -----------------------------
+// 練習ブロック：Go 8、No-Go 2、計10試行
+// -----------------------------
+const practice_trials = makeTrials(8, 2, "practice");
+addTrialsToTimeline(practice_trials);
+
+// 練習終了画面
+timeline.push({
+  type: jsPsychHtmlKeyboardResponse,
+  stimulus: `
+    <h2>練習は終了です</h2>
+    <p>次に本番を行います。</p>
+    <p>○が出たらスペースキーを押してください。</p>
+    <p>×が出たら押さないでください。</p>
+    <p>できるだけ速く、正確に反応してください。</p>
+    <p>何かキーを押すと本番が始まります。</p>
+  `
+});
+
+// -----------------------------
+// 本番ブロック：Go 80、No-Go 20、計100試行
+// -----------------------------
+const main_trials = makeTrials(80, 20, "main");
+addTrialsToTimeline(main_trials);
+
+
+// -----------------------------
+// Excel出力用関数
+// -----------------------------
+function getMainResults() {
+  const main_data = jsPsych.data.get().filter({block: "main"});
+  const go_trials = main_data.filter({stimulus_type: "go"});
+  const nogo_trials = main_data.filter({stimulus_type: "nogo"});
+
+  const n_go = go_trials.count();
+  const n_nogo = nogo_trials.count();
+
+  const hits = go_trials.filterCustom(x => x.response !== null).count();
+  const misses = go_trials.filterCustom(x => x.response === null).count();
+  const false_alarms = nogo_trials.filterCustom(x => x.response !== null).count();
+  const correct_rejections = nogo_trials.filterCustom(x => x.response === null).count();
+
+  const hit_rate = hits / n_go;
+  const omission_rate = misses / n_go;
+  const false_alarm_rate = false_alarms / n_nogo;
+  const correct_rejection_rate = correct_rejections / n_nogo;
+
+  const go_rt_trials = go_trials.filterCustom(x => x.response !== null && x.rt !== null);
+  const mean_go_rt = Math.round(go_rt_trials.select('rt').mean());
+
+  // d-prime補正：0%や100%による無限大を避ける
+  const corrected_hit_rate = (hits + 0.5) / (n_go + 1);
+  const corrected_false_alarm_rate = (false_alarms + 0.5) / (n_nogo + 1);
+  const d_prime = normInv(corrected_hit_rate) - normInv(corrected_false_alarm_rate);
+
+  return {
+    n_go,
+    n_nogo,
+    hits,
+    misses,
+    false_alarms,
+    correct_rejections,
+    hit_rate,
+    omission_rate,
+    false_alarm_rate,
+    correct_rejection_rate,
+    mean_go_rt,
+    d_prime
+  };
+}
+
+function exportExcel() {
+  const results = getMainResults();
+
+  const summaryRows = [
+    ["指標", "値"],
+    ["Go試行数", results.n_go],
+    ["No-Go試行数", results.n_nogo],
+    ["ヒット数", results.hits],
+    ["見逃し数", results.misses],
+    ["誤反応数", results.false_alarms],
+    ["正棄却数", results.correct_rejections],
+    ["ヒット率（%）", Math.round(results.hit_rate * 1000) / 10],
+    ["見逃し率（%）", Math.round(results.omission_rate * 1000) / 10],
+    ["誤反応率（%）", Math.round(results.false_alarm_rate * 1000) / 10],
+    ["正棄却率（%）", Math.round(results.correct_rejection_rate * 1000) / 10],
+    ["Go反応時間（ms）", results.mean_go_rt],
+    ["d-prime", Math.round(results.d_prime * 100) / 100]
+  ];
+
+  const trialRows = jsPsych.data.get()
+    .filter({block: "main"})
+    .values()
+    .map((x, index) => ({
+      trial_number: index + 1,
+      block: x.block,
+      stimulus_type: x.stimulus_type,
+      correct_response: x.correct_response === null ? "no response" : "space",
+      response: x.response === null ? "no response" : "space",
+      rt_ms: x.rt,
+      correct: x.correct,
+      hit: x.hit,
+      miss: x.miss,
+      false_alarm: x.false_alarm,
+      correct_rejection: x.correct_rejection
+    }));
+
+  const wb = XLSX.utils.book_new();
+
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+
+  const wsTrials = XLSX.utils.json_to_sheet(trialRows);
+  XLSX.utils.book_append_sheet(wb, wsTrials, "TrialData");
+
+  const now = new Date();
+  const timestamp =
+    now.getFullYear().toString() +
+    String(now.getMonth() + 1).padStart(2, "0") +
+    String(now.getDate()).padStart(2, "0") + "_" +
+    String(now.getHours()).padStart(2, "0") +
+    String(now.getMinutes()).padStart(2, "0") +
+    String(now.getSeconds()).padStart(2, "0");
+
+  XLSX.writeFile(wb, "gonogo_results_" + timestamp + ".xlsx");
+}
+
+// -----------------------------
+// 結果表示：本番のみ集計
+// -----------------------------
+timeline.push({
+
+  type: jsPsychHtmlKeyboardResponse,
+
+  stimulus: function() {
+
+    const results = getMainResults();
+
+    return `
+      <h2>終了です！</h2>
+
+      <p><strong>ヒット率：</strong>${Math.round(results.hit_rate * 1000) / 10}%</p>
+      <p><strong>見逃し率：</strong>${Math.round(results.omission_rate * 1000) / 10}%</p>
+      <p><strong>誤反応率：</strong>${Math.round(results.false_alarm_rate * 1000) / 10}%</p>
+      <p><strong>Go反応時間：</strong>${results.mean_go_rt} ms</p>
+      <p><strong>d-prime：</strong>${Math.round(results.d_prime * 100) / 100}</p>
+
+      <button onclick="exportExcel()" style="font-size:18px; padding:10px 20px; margin-top:20px;">
+        結果をExcelでダウンロード
+      </button>
+
+      <p style="margin-top:20px;">何かキーを押すと詳細データを画面表示します。</p>
+    `;
+  }
+
+});
+
+jsPsych.run(timeline);
+
+</script>
+
+</html>
